@@ -1,0 +1,9 @@
+- TypeScript only
+- Keep architecture simple
+- Never use real student data
+- Generate synthetic data only
+- Run tests after changes
+- Don't introduce unnecessary dependencies
+- Keep traditional and edge implementations behaviorally identical
+- Benchmark endpoints must return the same response format
+- Document commands in README

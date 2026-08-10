@@ -1,0 +1,37 @@
+{
+  "name": "edge-results-benchmark",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @edge-results/shared && npm run build --workspace @edge-results/api",
+    "typecheck": "npm run build --workspace @edge-results/shared && npm run typecheck --workspace @edge-results/api && tsc --noEmit -p tsconfig.scripts.json",
+    "pretest": "npm run build --workspace @edge-results/shared",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "predev:api": "npm run build --workspace @edge-results/shared",
+    "dev:api": "npm run dev --workspace @edge-results/api",
+    "prestart:api": "npm run build",
+    "start:api": "npm run start --workspace @edge-results/api",
+    "db:up": "docker compose up -d --wait postgres",
+    "db:down": "docker compose down",
+    "predb:migrate": "npm run build --workspace @edge-results/shared",
+    "db:migrate": "tsx --env-file-if-exists=.env scripts/migrate.ts",
+    "predata:generate": "npm run build --workspace @edge-results/shared",
+    "data:generate": "tsx --env-file-if-exists=.env scripts/generate-data.ts",
+    "predb:seed": "npm run build --workspace @edge-results/shared",
+    "db:seed": "tsx --env-file-if-exists=.env scripts/seed.ts",
+    "db:prepare": "npm run db:migrate && npm run data:generate && npm run db:seed",
+    "verify:phase1": "npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.10"
+  }
+}

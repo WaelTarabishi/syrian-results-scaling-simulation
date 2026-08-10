@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+.tmp/
+.env
+*.log
+
+# Generated from a deterministic script; do not hand-edit or treat as real data.
+database/generated/*.json
+!database/generated/.gitkeep
+
+# Benchmark output is local unless deliberately selected for publication.
+results/*
+!results/.gitkeep
