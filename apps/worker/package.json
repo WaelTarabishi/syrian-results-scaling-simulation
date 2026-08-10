@@ -1,0 +1,17 @@
+{
+  "name": "@edge-results/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "kv:put:local": "wrangler kv bulk put ../../database/generated/student-results.kv.json --binding RESULTS_KV --local",
+    "kv:put:remote": "wrangler kv bulk put ../../database/generated/student-results.kv.json --binding RESULTS_KV --remote"
+  },
+  "dependencies": {
+    "@edge-results/shared": "*"
+  }
+}

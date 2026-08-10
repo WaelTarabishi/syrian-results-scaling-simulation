@@ -1,9 +1,16 @@
-import { normalizeStudentId, type ResultErrorResponse, type ResultSuccessResponse } from "@edge-results/shared";
+import {
+  matchesResultIdentity,
+  normalizeStudentId,
+  type ResultErrorResponse,
+  type ResultSuccessResponse
+} from "@edge-results/shared";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { ResultRepository } from "./repository.js";
 
 interface ResultQuerystring {
   studentId?: string;
+  studentName?: string;
+  fatherName?: string;
 }
 
 interface BuildAppOptions {
@@ -30,7 +37,7 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
     }
 
     const result = await options.repository.findByNormalizedStudentId(normalizeStudentId(rawStudentId));
-    if (!result) {
+    if (!result || !matchesResultIdentity(result, request.query.studentName, request.query.fatherName)) {
       const response: ResultErrorResponse = {
         success: false,
         error: {

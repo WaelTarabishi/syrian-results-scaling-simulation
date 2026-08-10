@@ -7,7 +7,7 @@ Traditional: k6 -> Fastify API -> PostgreSQL
 Edge:        k6 -> Cloudflare Worker -> Workers KV
 ```
 
-Only Phase 1 is implemented. It establishes the repository, shared behavior, synthetic dataset, PostgreSQL schema, and traditional API. The Worker, k6 suites, web interface, and measured benchmark report are intentionally deferred to later phases.
+Phases 1 and 2 are implemented. The repository contains the shared behavior, synthetic dataset, PostgreSQL-backed traditional API, and a Cloudflare Worker backed only by Workers KV. The k6 suites, web interface, and measured benchmark report are intentionally deferred to later phases.
 
 > All names, IDs, and results in this repository are deterministic synthetic data. Never import or test with real student data.
 
@@ -28,7 +28,7 @@ k6 / React UI -> Fastify API     Cloudflare Worker
 
 The traditional API performs one parameterized lookup through a bounded PostgreSQL connection pool. The normalized ID has a unique constraint, which also supplies its B-tree lookup index.
 
-The future Worker will normalize the ID with the same shared function and derive a key in this form:
+The Worker normalizes the ID with the same shared function and derives a key in this form:
 
 ```text
 result:v1:<HMAC-SHA-256(LOOKUP_KEY_SECRET, normalizedStudentId)>
@@ -42,6 +42,12 @@ Lookup:
 
 ```http
 GET /api/result?studentId=STU-000001
+```
+
+`studentName` and `fatherName` are optional, backward-compatible verification fields. When present, both are normalized and must match the stored synthetic record. A mismatch returns the same `RESULT_NOT_FOUND` response as an unknown ID:
+
+```http
+GET /api/result?studentId=STU-000001&studentName=Lina%20Haddad&fatherName=Fadi%20Haddad
 ```
 
 Successful response (`200`):
@@ -81,15 +87,15 @@ The stable error codes are `INVALID_REQUEST`, `RESULT_NOT_FOUND`, and `INTERNAL_
 - Student and father names: Unicode NFKC, trim, collapse whitespace, lowercase with the `en-US` locale for their stored normalized forms.
 - Display values retain their generated capitalization.
 
-The endpoint currently searches only by student ID. Normalized names are stored now so future experiments do not invent different ingestion rules for PostgreSQL and KV.
+The endpoint indexes by student ID. Optional student and father names verify the record after lookup; normalized names are stored with both PostgreSQL and KV data so ingestion rules do not diverge.
 
 ## Repository structure
 
 ```text
 apps/
-  api/                    # Phase 1 Fastify/PostgreSQL implementation
+  api/                    # Fastify/PostgreSQL implementation
   web/                    # Phase 4 React/Vite UI
-  worker/                 # Phase 2 Cloudflare Worker
+  worker/                 # Cloudflare Worker/Workers KV implementation
 packages/
   shared/                 # Normalization and response contract
 scripts/                  # Deterministic generation, migration, and seed tools
@@ -131,14 +137,61 @@ npm run db:down
 | Command | Purpose |
 |---|---|
 | `npm run data:generate` | Write exactly 10,000 deterministic fake records to `database/generated/student-results.json`. |
+| `npm run kv:generate` | Convert that corpus into HMAC-keyed Wrangler bulk KV entries. |
 | `npm run db:migrate` | Apply the idempotent Phase 1 schema and enable `pg_stat_statements`. |
 | `npm run db:seed` | Replace table contents from the generated corpus in 500-row batches. |
 | `npm run db:prepare` | Migrate, generate, and seed in order. |
 | `npm run dev:api` | Run Fastify in watch mode. |
-| `npm run build` | Compile the shared package and API. |
+| `npm run worker:kv:local` | Load the generated KV entries into Wrangler's local KV state. |
+| `npm run worker:dev` | Run the Worker locally on `http://localhost:8787`. |
+| `npm run worker:kv:remote` | Upload the generated KV entries to the configured Cloudflare namespace. |
+| `npm run worker:deploy` | Deploy the Worker with Wrangler. |
+| `npm run test:worker` | Run the Worker lookup and normalization tests. |
+| `npm run build` | Build the shared package and type-check both implementations. |
 | `npm test` | Run normalization, generator, and HTTP contract tests. |
 | `npm run typecheck` | Strictly type-check packages and scripts. |
 | `npm run verify:phase1` | Run type-checking, all tests, and production builds. |
+| `npm run verify:phase2` | Verify shared, traditional API, Worker, scripts, and builds. |
+
+## Phase 2 Worker quick start
+
+The generated KV keys depend on `LOOKUP_KEY_SECRET`, so the converter and Worker must use exactly the same value. Put a long random development value in the root `.env` file. Copy `apps/worker/.dev.vars.example` to `apps/worker/.dev.vars` and put that same value there. Both files are ignored by Git.
+
+Generate the canonical synthetic corpus, convert it to Wrangler's bulk KV format, populate local KV, and start the Worker:
+
+```powershell
+npm run data:generate
+npm run kv:generate
+npm run worker:kv:local
+npm run worker:dev
+```
+
+Wrangler's local KV simulation is independent of PostgreSQL. With Fastify and PostgreSQL stopped, this request still succeeds:
+
+```powershell
+Invoke-RestMethod 'http://localhost:8787/api/result?studentId=STU-000001&studentName=Lina%20Haddad&fatherName=Fadi%20Haddad'
+```
+
+### Cloudflare deployment
+
+Authenticate Wrangler and create the remote KV namespace:
+
+```powershell
+npx wrangler login
+npx wrangler kv namespace create RESULTS_KV --config apps/worker/wrangler.jsonc
+```
+
+Copy the namespace ID printed by Wrangler over the placeholder `id` in `apps/worker/wrangler.jsonc`. Keep the same `LOOKUP_KEY_SECRET` in the root `.env`, generate and upload the entries, then deploy the Worker and enter that same secret when prompted:
+
+```powershell
+npm run data:generate
+npm run kv:generate
+npm run worker:kv:remote
+npm run worker:deploy
+npx wrangler secret put LOOKUP_KEY_SECRET --config apps/worker/wrangler.jsonc
+```
+
+Changing the HMAC secret changes every KV key. Rotate it only by regenerating and republishing the complete corpus with the new value before switching the Worker secret. Cloudflare KV is eventually consistent, so secret rotation and dataset replacement should be treated as a coordinated deployment rather than an atomic update.
 
 ## Observing the traditional path
 
@@ -195,7 +248,7 @@ The later benchmark implementation will follow these rules:
 - pooled Fastify `/api/result` endpoint
 - normalization, generator, and HTTP contract tests
 
-### Phase 2 — edge implementation
+### Phase 2 — edge implementation (implemented)
 
 - Cloudflare Worker and Wrangler configuration
 - portable HMAC lookup-key helper and fixed secret handling
@@ -225,8 +278,10 @@ The later benchmark implementation will follow these rules:
 
 ## Current limitations
 
-- No Worker, KV publisher, k6 suites, or React application exists yet.
-- No comparative performance result is claimed in Phase 1.
+- No k6 suites or React application exists yet.
+- Workers KV is eventually consistent; the Worker is not suitable for immediate cross-region read-after-write workflows.
+- HMAC lookup keys reduce raw-ID exposure in KV tooling, but the unauthenticated demo endpoint is not a production privacy boundary.
+- No comparative performance result is claimed yet.
 - The schema models one result per student ID and one academic year for a focused read benchmark, not a production education domain.
 - There is no authentication. A real results system must add authorization, privacy controls, audit logging, key rotation, retention policy, and abuse protection.
 - Synthetic names intentionally repeat and must never be mistaken for a production-like identity model.

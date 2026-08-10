@@ -8,30 +8,40 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace @edge-results/shared && npm run build --workspace @edge-results/api",
-    "typecheck": "npm run build --workspace @edge-results/shared && npm run typecheck --workspace @edge-results/api && tsc --noEmit -p tsconfig.scripts.json",
+    "build": "npm run build --workspace @edge-results/shared && npm run build --workspace @edge-results/api && npm run build --workspace @edge-results/worker",
+    "typecheck": "npm run build --workspace @edge-results/shared && npm run typecheck --workspace @edge-results/api && npm run typecheck --workspace @edge-results/worker && tsc --noEmit -p tsconfig.scripts.json",
     "pretest": "npm run build --workspace @edge-results/shared",
     "test": "vitest run",
+    "pretest:worker": "npm run build --workspace @edge-results/shared",
+    "test:worker": "vitest run apps/worker/src",
     "test:watch": "vitest",
     "predev:api": "npm run build --workspace @edge-results/shared",
     "dev:api": "npm run dev --workspace @edge-results/api",
     "prestart:api": "npm run build",
     "start:api": "npm run start --workspace @edge-results/api",
+    "worker:dev": "npm run dev --workspace @edge-results/worker",
+    "worker:deploy": "npm run deploy --workspace @edge-results/worker",
     "db:up": "docker compose up -d --wait postgres",
     "db:down": "docker compose down",
     "predb:migrate": "npm run build --workspace @edge-results/shared",
     "db:migrate": "tsx --env-file-if-exists=.env scripts/migrate.ts",
     "predata:generate": "npm run build --workspace @edge-results/shared",
     "data:generate": "tsx --env-file-if-exists=.env scripts/generate-data.ts",
+    "prekv:generate": "npm run build --workspace @edge-results/shared",
+    "kv:generate": "tsx --env-file-if-exists=.env scripts/generate-kv-entries.ts",
+    "worker:kv:local": "npm run kv:put:local --workspace @edge-results/worker",
+    "worker:kv:remote": "npm run kv:put:remote --workspace @edge-results/worker",
     "predb:seed": "npm run build --workspace @edge-results/shared",
     "db:seed": "tsx --env-file-if-exists=.env scripts/seed.ts",
     "db:prepare": "npm run db:migrate && npm run data:generate && npm run db:seed",
-    "verify:phase1": "npm run typecheck && npm test && npm run build"
+    "verify:phase1": "npm run typecheck && npm test && npm run build",
+    "verify:phase2": "npm run typecheck && npm run test:worker && npm test && npm run build"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "wrangler": "^4.120.0"
   }
 }

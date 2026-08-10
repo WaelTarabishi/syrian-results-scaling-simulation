@@ -26,3 +26,10 @@ export interface ResultErrorResponse {
 }
 
 export type ResultResponse = ResultSuccessResponse | ResultErrorResponse;
+
+/** Value stored in Workers KV. Normalized names are verification-only metadata. */
+export interface KvStudentResult {
+  data: StudentResult;
+  studentNameNormalized: string;
+  fatherNameNormalized: string;
+}

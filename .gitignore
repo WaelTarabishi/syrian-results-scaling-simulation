@@ -3,6 +3,8 @@ dist/
 coverage/
 .tmp/
 .env
+.dev.vars
+.wrangler/
 *.log
 
 # Generated from a deterministic script; do not hand-edit or treat as real data.

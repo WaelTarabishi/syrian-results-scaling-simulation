@@ -61,4 +61,27 @@ describe("GET /api/result", () => {
       error: { code: "RESULT_NOT_FOUND", message: "No result was found for that student ID" }
     });
   });
+
+  it("verifies optional normalized identity fields without changing ID-only lookups", async () => {
+    const repository = createRepository(result);
+    const app = buildApp({ repository });
+    apps.push(app);
+
+    const match = await app.inject({
+      method: "GET",
+      url: "/api/result?studentId=STU-000001&studentName=%20lina%20%20HADDAD&fatherName=omar%20haddad"
+    });
+    const mismatch = await app.inject({
+      method: "GET",
+      url: "/api/result?studentId=STU-000001&studentName=Wrong%20Name&fatherName=Omar%20Haddad"
+    });
+
+    expect(match.statusCode).toBe(200);
+    expect(match.json()).toEqual({ success: true, data: result });
+    expect(mismatch.statusCode).toBe(404);
+    expect(mismatch.json()).toEqual({
+      success: false,
+      error: { code: "RESULT_NOT_FOUND", message: "No result was found for that student ID" }
+    });
+  });
 });

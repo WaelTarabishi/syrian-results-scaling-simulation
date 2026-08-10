@@ -1,0 +1,17 @@
+{
+	"$schema": "../../node_modules/wrangler/config-schema.json",
+	"name": "edge-results-worker",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-08-10",
+	"secrets": {
+		"required": [
+			"LOOKUP_KEY_SECRET"
+		]
+	},
+	"kv_namespaces": [
+		{
+			"binding": "RESULTS_KV",
+			"id": "ac7e75f6f6754c7e97f70308422eddab"
+		}
+	]
+}
