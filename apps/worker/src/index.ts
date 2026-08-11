@@ -17,7 +17,10 @@ export interface Env {
 }
 
 function jsonResponse(body: ResultSuccessResponse | ResultErrorResponse, status: number): Response {
-  return Response.json(body, { status });
+  return Response.json(body, {
+    status,
+    headers: { "Access-Control-Allow-Origin": "*" }
+  });
 }
 
 function notFound(): Response {

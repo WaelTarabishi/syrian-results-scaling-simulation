@@ -7,7 +7,7 @@ Traditional: k6 -> Fastify API -> PostgreSQL
 Edge:        k6 -> Cloudflare Worker -> Workers KV
 ```
 
-Phases 1 through 3 are implemented. The repository contains the shared behavior, synthetic dataset, PostgreSQL-backed traditional API, Cloudflare Worker backed only by Workers KV, and equivalent k6 workload profiles. The web interface and measured comparison report are intentionally deferred to later phases.
+Phases 1 through 4 are implemented. The repository contains the shared behavior, synthetic dataset, PostgreSQL-backed traditional API, Cloudflare Worker backed only by Workers KV, equivalent k6 workload profiles, and a React interface for selecting either lookup path. The measured comparison report is intentionally deferred to Phase 5.
 
 > All names, IDs, and results in this repository are deterministic synthetic data. Never import or test with real student data.
 
@@ -142,6 +142,7 @@ npm run db:down
 | `npm run db:seed` | Replace table contents from the generated corpus in 500-row batches. |
 | `npm run db:prepare` | Migrate, generate, and seed in order. |
 | `npm run dev:api` | Run Fastify in watch mode. |
+| `npm run dev:web` | Run the React/Vite interface on `http://127.0.0.1:5173`. |
 | `npm run worker:kv:local` | Load the generated KV entries into Wrangler's local KV state. |
 | `npm run worker:dev` | Run the Worker locally on `http://localhost:8787`. |
 | `npm run worker:kv:remote` | Upload the generated KV entries to the configured Cloudflare namespace. |
@@ -160,6 +161,7 @@ npm run db:down
 | `npm run verify:phase1` | Run type-checking, all tests, and production builds. |
 | `npm run verify:phase2` | Verify shared, traditional API, Worker, scripts, and builds. |
 | `npm run verify:phase3` | Verify the full repository, generate the k6 fixture, and inspect the suite. |
+| `npm run verify:phase4` | Type-check, test, and production-build the complete repository including the web interface. |
 
 ## Phase 2 Worker quick start
 
@@ -221,6 +223,43 @@ Every profile uses the same TypeScript request function, deterministic record or
 | Spike | Hold 20, jump to 400 for 30 seconds, then return to 20 requests/second | Measure sudden-load response and recovery. |
 
 Measured thresholds are fixed for both targets: HTTP and contract failure rates below 1%, check success above 99%, p95 below 1,000 ms, p99 below 2,000 ms, at least one request, and zero dropped iterations. A threshold failure is a result to investigate, especially for stress and spike; it does not make runs incomparable.
+
+### Run k6 against the local traditional API
+
+PowerShell environment variables remain set for the current terminal session. Set `K6_TARGET` and `K6_BASE_URL` explicitly before every run so that a previous edge test does not accidentally send the next test to the deployed Worker.
+
+In the first terminal, prepare PostgreSQL and start the traditional API. `db:prepare` is only required initially or when the synthetic database needs to be rebuilt; keep `dev:api` running while k6 executes:
+
+```powershell
+npm run db:up
+npm run db:prepare
+npm run dev:api
+```
+
+In a second terminal, generate the lookup fixture and run a local smoke test:
+
+```powershell
+npm run k6:fixture
+
+$env:K6_TARGET = 'traditional'
+$env:K6_BASE_URL = 'http://127.0.0.1:3001'
+$env:K6_RUN_ID = 'traditional-local-smoke-1'
+$env:K6_GENERATOR_LOCATION = 'local-windows'
+
+npm run k6:smoke
+```
+
+To see a live dashboard and export a self-contained HTML report, enable k6's built-in web dashboard before running the test:
+
+```powershell
+$env:K6_WEB_DASHBOARD = 'true'
+$env:K6_WEB_DASHBOARD_PERIOD = '1s'
+$env:K6_WEB_DASHBOARD_EXPORT = "results/$($env:K6_RUN_ID).html"
+
+npm run k6:smoke
+```
+
+Open `http://127.0.0.1:5665` while the test is running. The run writes the machine-readable summary to `results/traditional-local-smoke-1.summary.json` and the shareable dashboard to `results/traditional-local-smoke-1.html`. The HTML report is for visualization; the `measured` section of the JSON summary remains the authoritative aggregate result because it excludes warm-up traffic.
 
 Set the target explicitly before every run. For the traditional API:
 
@@ -300,6 +339,40 @@ The later benchmark implementation will follow these rules:
 - Changing application logging or observability overhead between compared runs.
 - Claiming causal superiority when the architectures have different consistency, cost, and operational trade-offs.
 
+## Phase 4 frontend
+
+Start the traditional API, local Worker, and Vite interface in separate terminals. Prepare PostgreSQL and local KV first if they do not already contain the generated corpus:
+
+```powershell
+npm run db:up
+npm run db:prepare
+npm run worker:kv:local
+```
+
+```powershell
+npm run dev:api
+```
+
+```powershell
+npm run worker:dev
+```
+
+```powershell
+npm run dev:web
+```
+
+Open `http://127.0.0.1:5173`. Vite proxies Traditional requests to `http://127.0.0.1:3001` and Edge requests to `http://127.0.0.1:8787`, so both local implementations keep the same `/api/result` contract.
+
+To use deployed services instead, set the complete lookup endpoint URLs before starting or building the web app:
+
+```powershell
+$env:VITE_TRADITIONAL_API_URL = 'https://api.example.com/api/result'
+$env:VITE_EDGE_API_URL = 'https://edge-results-worker.example.workers.dev/api/result'
+npm run dev:web
+```
+
+The interface includes keyboard-operable backend selection, a required student-ID field, polite loading and result announcements, a distinct not-found message, and an assertive service-failure state with retry. Both lookup services allow browser GET requests and continue returning the same JSON response envelopes.
+
 ## Implementation phases
 
 ### Phase 1 — traditional baseline (implemented)
@@ -327,7 +400,7 @@ The later benchmark implementation will follow these rules:
 - fixed thresholds and summary export for requests/sec, p50, p95, p99, and error rate
 - reproducible run metadata and traditional-path resource capture
 
-### Phase 4 — frontend
+### Phase 4 — frontend (implemented)
 
 - small React/Vite form for student ID
 - backend selector for Traditional or Edge
@@ -341,7 +414,6 @@ The later benchmark implementation will follow these rules:
 
 ## Current limitations
 
-- No React application exists yet.
 - Workers KV is eventually consistent; the Worker is not suitable for immediate cross-region read-after-write workflows.
 - HMAC lookup keys reduce raw-ID exposure in KV tooling, but the unauthenticated demo endpoint is not a production privacy boundary.
 - No comparative performance result is claimed yet.

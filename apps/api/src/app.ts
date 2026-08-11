@@ -21,6 +21,11 @@ interface BuildAppOptions {
 export function buildApp(options: BuildAppOptions): FastifyInstance {
   const app = Fastify({ logger: options.logger ?? false });
 
+  app.addHook("onSend", async (_request, reply, payload) => {
+    reply.header("Access-Control-Allow-Origin", "*");
+    return payload;
+  });
+
   app.get("/health", async () => ({ status: "ok" }));
 
   app.get<{ Querystring: ResultQuerystring }>("/api/result", async (request, reply) => {

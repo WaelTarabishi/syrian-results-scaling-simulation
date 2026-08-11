@@ -8,8 +8,8 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace @edge-results/shared && npm run build --workspace @edge-results/api && npm run build --workspace @edge-results/worker",
-    "typecheck": "npm run build --workspace @edge-results/shared && npm run typecheck --workspace @edge-results/api && npm run typecheck --workspace @edge-results/worker && tsc --noEmit -p tsconfig.scripts.json && tsc --noEmit -p tsconfig.k6.json",
+    "build": "npm run build --workspace @edge-results/shared && npm run build --workspace @edge-results/api && npm run build --workspace @edge-results/worker && npm run build --workspace @edge-results/web",
+    "typecheck": "npm run build --workspace @edge-results/shared && npm run typecheck --workspace @edge-results/api && npm run typecheck --workspace @edge-results/worker && npm run typecheck --workspace @edge-results/web && tsc --noEmit -p tsconfig.scripts.json && tsc --noEmit -p tsconfig.k6.json",
     "pretest": "npm run build --workspace @edge-results/shared",
     "test": "vitest run",
     "pretest:worker": "npm run build --workspace @edge-results/shared",
@@ -17,6 +17,7 @@
     "test:watch": "vitest",
     "predev:api": "npm run build --workspace @edge-results/shared",
     "dev:api": "npm run dev --workspace @edge-results/api",
+    "dev:web": "npm run dev --workspace @edge-results/web",
     "prestart:api": "npm run build",
     "start:api": "npm run start --workspace @edge-results/api",
     "worker:dev": "npm run dev --workspace @edge-results/worker",
@@ -43,7 +44,8 @@
     "db:prepare": "npm run db:migrate && npm run data:generate && npm run db:seed",
     "verify:phase1": "npm run typecheck && npm test && npm run build",
     "verify:phase2": "npm run typecheck && npm run test:worker && npm test && npm run build",
-    "verify:phase3": "npm run verify:phase2 && npm run k6:fixture && npm run k6:inspect"
+    "verify:phase3": "npm run verify:phase2 && npm run k6:fixture && npm run k6:inspect",
+    "verify:phase4": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
     "@types/k6": "^2.0.1",
