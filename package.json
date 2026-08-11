@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspace @edge-results/shared && npm run build --workspace @edge-results/api && npm run build --workspace @edge-results/worker",
-    "typecheck": "npm run build --workspace @edge-results/shared && npm run typecheck --workspace @edge-results/api && npm run typecheck --workspace @edge-results/worker && tsc --noEmit -p tsconfig.scripts.json",
+    "typecheck": "npm run build --workspace @edge-results/shared && npm run typecheck --workspace @edge-results/api && npm run typecheck --workspace @edge-results/worker && tsc --noEmit -p tsconfig.scripts.json && tsc --noEmit -p tsconfig.k6.json",
     "pretest": "npm run build --workspace @edge-results/shared",
     "test": "vitest run",
     "pretest:worker": "npm run build --workspace @edge-results/shared",
@@ -31,13 +31,23 @@
     "kv:generate": "tsx --env-file-if-exists=.env scripts/generate-kv-entries.ts",
     "worker:kv:local": "npm run kv:put:local --workspace @edge-results/worker",
     "worker:kv:remote": "npm run kv:put:remote --workspace @edge-results/worker",
+    "k6:fixture": "tsx scripts/generate-k6-fixture.ts",
+    "k6:inspect": "k6 inspect -e K6_TARGET=traditional -e K6_BASE_URL=http://127.0.0.1:3001 load-tests/smoke.ts",
+    "k6:smoke": "k6 run load-tests/smoke.ts",
+    "k6:load": "k6 run load-tests/load.ts",
+    "k6:stress": "k6 run load-tests/stress.ts",
+    "k6:spike": "k6 run load-tests/spike.ts",
+    "benchmark:capture:traditional": "tsx --env-file-if-exists=.env scripts/capture-traditional-metrics.ts",
     "predb:seed": "npm run build --workspace @edge-results/shared",
     "db:seed": "tsx --env-file-if-exists=.env scripts/seed.ts",
     "db:prepare": "npm run db:migrate && npm run data:generate && npm run db:seed",
     "verify:phase1": "npm run typecheck && npm test && npm run build",
-    "verify:phase2": "npm run typecheck && npm run test:worker && npm test && npm run build"
+    "verify:phase2": "npm run typecheck && npm run test:worker && npm test && npm run build",
+    "verify:phase3": "npm run verify:phase2 && npm run k6:fixture && npm run k6:inspect"
   },
   "devDependencies": {
+    "@types/k6": "^2.0.1",
+    "@types/k6": "^2.0.1",
     "@types/node": "^22.10.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",

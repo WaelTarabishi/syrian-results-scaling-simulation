@@ -7,7 +7,7 @@ Traditional: k6 -> Fastify API -> PostgreSQL
 Edge:        k6 -> Cloudflare Worker -> Workers KV
 ```
 
-Phases 1 and 2 are implemented. The repository contains the shared behavior, synthetic dataset, PostgreSQL-backed traditional API, and a Cloudflare Worker backed only by Workers KV. The k6 suites, web interface, and measured benchmark report are intentionally deferred to later phases.
+Phases 1 through 3 are implemented. The repository contains the shared behavior, synthetic dataset, PostgreSQL-backed traditional API, Cloudflare Worker backed only by Workers KV, and equivalent k6 workload profiles. The web interface and measured comparison report are intentionally deferred to later phases.
 
 > All names, IDs, and results in this repository are deterministic synthetic data. Never import or test with real student data.
 
@@ -147,11 +147,19 @@ npm run db:down
 | `npm run worker:kv:remote` | Upload the generated KV entries to the configured Cloudflare namespace. |
 | `npm run worker:deploy` | Deploy the Worker with Wrangler. |
 | `npm run test:worker` | Run the Worker lookup and normalization tests. |
+| `npm run k6:fixture` | Derive the shared k6 identity pool from the canonical synthetic corpus. |
+| `npm run k6:inspect` | Parse and inspect the smoke suite without sending requests. |
+| `npm run k6:smoke` | Run the low-rate correctness profile against the selected target. |
+| `npm run k6:load` | Run the sustained 50 requests/second profile. |
+| `npm run k6:stress` | Ramp from 25 to 300 requests/second. |
+| `npm run k6:spike` | Jump from 20 to 400 requests/second and recover. |
+| `npm run benchmark:capture:traditional` | Save PostgreSQL and container metrics for the current `K6_RUN_ID`. |
 | `npm run build` | Build the shared package and type-check both implementations. |
 | `npm test` | Run normalization, generator, and HTTP contract tests. |
 | `npm run typecheck` | Strictly type-check packages and scripts. |
 | `npm run verify:phase1` | Run type-checking, all tests, and production builds. |
 | `npm run verify:phase2` | Verify shared, traditional API, Worker, scripts, and builds. |
+| `npm run verify:phase3` | Verify the full repository, generate the k6 fixture, and inspect the suite. |
 
 ## Phase 2 Worker quick start
 
@@ -181,21 +189,76 @@ npx wrangler login
 npx wrangler kv namespace create RESULTS_KV --config apps/worker/wrangler.jsonc
 ```
 
-Copy the namespace ID printed by Wrangler over the placeholder `id` in `apps/worker/wrangler.jsonc`. Keep the same `LOOKUP_KEY_SECRET` in the root `.env`, generate and upload the entries, then deploy the Worker and enter that same secret when prompted:
+Copy the namespace ID printed by Wrangler over the placeholder `id` in `apps/worker/wrangler.jsonc`. Keep the same `LOOKUP_KEY_SECRET` in the root `.env` and `apps/worker/.dev.vars`, then generate and upload the entries. A Worker's first deployment must supply its required secret with the code:
 
 ```powershell
 npm run data:generate
 npm run kv:generate
 npm run worker:kv:remote
-npm run worker:deploy
-npx wrangler secret put LOOKUP_KEY_SECRET --config apps/worker/wrangler.jsonc
+npx --no-install wrangler deploy --config apps/worker/wrangler.jsonc --secrets-file apps/worker/.dev.vars
 ```
+
+After the first deployment, `npm run worker:deploy` updates the code while preserving the configured secret.
 
 Changing the HMAC secret changes every KV key. Rotate it only by regenerating and republishing the complete corpus with the new value before switching the Worker secret. Cloudflare KV is eventually consistent, so secret rotation and dataset replacement should be treated as a coordinated deployment rather than an atomic update.
 
+## Phase 3 load testing
+
+Prerequisites are k6 1.7 or newer and a prepared canonical corpus. Generate the small lookup-only fixture from the exact corpus used by PostgreSQL and KV:
+
+```powershell
+npm run data:generate
+npm run k6:fixture
+```
+
+Every profile uses the same TypeScript request function, deterministic record order, complete student/father-name inputs, and a default 5% expected not-found distribution. Expected `404` responses are contract-checked but are not counted as HTTP failures. A separate 5 requests/second, 10-second warm-up runs first; all thresholds and report fields select only `phase:measured` metrics.
+
+| Profile | Measured offered load | Purpose |
+|---|---:|---|
+| Smoke | 1 request/second for 10 seconds | Verify connectivity, response contracts, and configuration; do not use its tiny sample for performance conclusions. |
+| Load | 50 requests/second for 3 minutes | Measure a steady, controlled offered rate. |
+| Stress | Ramp 25 → 50 → 100 → 200 → 300 requests/second over 4 minutes, then ramp down for 30 seconds | Find degradation and saturation behavior. |
+| Spike | Hold 20, jump to 400 for 30 seconds, then return to 20 requests/second | Measure sudden-load response and recovery. |
+
+Measured thresholds are fixed for both targets: HTTP and contract failure rates below 1%, check success above 99%, p95 below 1,000 ms, p99 below 2,000 ms, at least one request, and zero dropped iterations. A threshold failure is a result to investigate, especially for stress and spike; it does not make runs incomparable.
+
+Set the target explicitly before every run. For the traditional API:
+
+```powershell
+$env:K6_TARGET = 'traditional'
+$env:K6_BASE_URL = 'http://127.0.0.1:3001'
+$env:K6_RUN_ID = 'traditional-smoke-1'
+$env:K6_GENERATOR_LOCATION = 'local-windows'
+npm run k6:smoke
+```
+
+For the deployed Worker:
+
+```powershell
+$env:K6_TARGET = 'edge'
+$env:K6_BASE_URL = 'https://edge-results-worker.<your-subdomain>.workers.dev'
+$env:K6_RUN_ID = 'edge-smoke-1'
+$env:K6_GENERATOR_LOCATION = 'local-windows'
+npm run k6:smoke
+```
+
+Replace `k6:smoke` with `k6:load`, `k6:stress`, or `k6:spike`. Optional variables are `K6_MISS_PERCENT` (integer 0–100, default 5), `K6_REQUEST_TIMEOUT` (default `10s`), and `K6_DATASET_VERSION` (default `synthetic-v1`). Each run writes `results/<K6_RUN_ID>.summary.json` containing metadata, measured p50/p95/p99, achieved request rate, failures, checks, dropped iterations, hit/miss counts, and the full k6 end-of-test summary.
+
+Run each measured profile at least three times per target, alternate target order, and use unique IDs such as `traditional-load-1`, `edge-load-1`, `edge-load-2`, and `traditional-load-2`. Keep the generator machine and location, corpus, hit/miss ratio, traditional pool size, logging, and infrastructure unchanged.
+
+For a traditional run, reset PostgreSQL statement counters immediately before k6 and capture the aggregate database/container snapshot immediately afterward, keeping the same `K6_RUN_ID`:
+
+```powershell
+docker compose exec postgres psql -U benchmark -d results_benchmark -c "select pg_stat_statements_reset();"
+npm run k6:load
+npm run benchmark:capture:traditional
+```
+
+This writes `results/<K6_RUN_ID>.traditional-resources.json`. Monitor the Fastify process concurrently with `Get-Process -Id <API_PID>` and record representative CPU/memory samples; a single post-run process value does not represent utilization during the run.
+
 ## Observing the traditional path
 
-PostgreSQL starts with `pg_stat_statements` and I/O timing enabled. During a later k6 run, use separate terminals for container resource usage and database activity:
+PostgreSQL starts with `pg_stat_statements` and I/O timing enabled. During a k6 run, use separate terminals for container resource usage and database activity:
 
 ```powershell
 docker stats
@@ -257,7 +320,7 @@ The later benchmark implementation will follow these rules:
 - contract tests run against both implementations
 - explicit proof that Worker reads have no origin dependency
 
-### Phase 3 — load testing
+### Phase 3 — load testing (implemented)
 
 - one shared k6 data fixture
 - smoke, load, stress, and spike executors
@@ -278,7 +341,7 @@ The later benchmark implementation will follow these rules:
 
 ## Current limitations
 
-- No k6 suites or React application exists yet.
+- No React application exists yet.
 - Workers KV is eventually consistent; the Worker is not suitable for immediate cross-region read-after-write workflows.
 - HMAC lookup keys reduce raw-ID exposure in KV tooling, but the unauthenticated demo endpoint is not a production privacy boundary.
 - No comparative performance result is claimed yet.
