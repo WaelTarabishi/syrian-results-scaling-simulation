@@ -155,6 +155,10 @@ npm run db:down
 | `npm run k6:stress` | Ramp from 25 to 300 requests/second. |
 | `npm run k6:spike` | Jump from 20 to 400 requests/second and recover. |
 | `npm run benchmark:capture:traditional` | Save PostgreSQL and container metrics for the current `K6_RUN_ID`. |
+| `npm run ec2:provision` | Provision and bootstrap the traditional API/PostgreSQL path on EC2. |
+| `npm run ec2:status` | Print the EC2 instance state, API URL, and Session Manager command. |
+| `npm run ec2:connect` | Open a Session Manager shell without exposing SSH. |
+| `npm run ec2:destroy` | Delete the benchmark CloudFormation stack after explicit confirmation. |
 | `npm run build` | Build the shared package and type-check both implementations. |
 | `npm test` | Run normalization, generator, and HTTP contract tests. |
 | `npm run typecheck` | Strictly type-check packages and scripts. |
@@ -311,6 +315,109 @@ docker compose exec postgres psql -U benchmark -d results_benchmark -c "select p
 ```
 
 Record API process CPU and memory as well as PostgreSQL container CPU, memory, active connections, query calls, mean execution time, and total execution time. Connection-pool size is an experimental parameter and must stay fixed across repeated traditional runs.
+
+## EC2 traditional-path deployment
+
+The TypeScript provisioning command creates one Amazon Linux 2023 EC2 instance for the traditional benchmark path. CloudFormation owns the instance, encrypted 20 GB gp3 root volume, security group, Systems Manager role, optional SSH key-pair attachment, and optional Secrets Manager read permission. EC2 bootstrap installs Docker, Git, Node.js 22, and npm; clones the selected repository branch; creates instance-local random development secrets; generates and seeds the deterministic synthetic corpus; and starts Fastify as a systemd service. PostgreSQL runs directly as a restartable Docker container bound only to EC2 loopback and is not exposed by the EC2 security group.
+
+Prerequisites:
+
+- AWS CLI v2 authenticated locally. Do not put AWS access keys in this repository.
+- The [AWS Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) if `npm run ec2:connect` will be used.
+- Permission to manage CloudFormation, EC2, IAM roles and instance profiles, and Systems Manager in the selected account.
+- All code to deploy committed and pushed. EC2 clones GitHub and cannot see uncommitted local files.
+- Either permission for the stack to create a minimal public VPC, or explicit `EC2_VPC_ID` and `EC2_SUBNET_ID` values for an existing public subnet.
+- A public repository, or a fine-grained read-only GitHub token stored as a plain secret value in AWS Secrets Manager.
+
+Find the public IPv4 address of the local k6 generator and restrict the API to that one address:
+
+```powershell
+$publicIp = (Invoke-RestMethod 'https://checkip.amazonaws.com').Trim()
+$env:EC2_ALLOWED_CIDR = "$publicIp/32"
+$env:AWS_REGION = 'us-east-1'
+$env:AWS_PROFILE = 'default'
+$env:EC2_INSTANCE_TYPE = 'c7i.large'
+
+npm run ec2:provision
+```
+
+To enable manual SSH debugging on a newly created instance, supply an existing EC2 key pair name before provisioning. By default the same CIDR used for the benchmark API is also used for SSH:
+
+```powershell
+$env:EC2_KEY_NAME = 'your-existing-keypair-name'
+$env:EC2_SSH_ALLOWED_CIDR = $env:EC2_ALLOWED_CIDR
+npm run ec2:provision
+```
+
+The defaults are stack name `edge-results-benchmark`, branch currently checked out locally, region `us-east-1` when neither AWS region variable is set, `c7i.large`, and detailed EC2 monitoring enabled. Override them when necessary:
+
+| Variable | Meaning |
+|---|---|
+| `EC2_ALLOWED_CIDR` | Required IPv4 CIDR permitted to call port 3001; normally the k6 generator's public IP with `/32`. |
+| `AWS_REGION` | AWS deployment region. |
+| `AWS_PROFILE` | Optional local AWS CLI profile. |
+| `EC2_INSTANCE_TYPE` | EC2 size; use the same fixed type for every reported run. |
+| `EC2_KEY_NAME` | Optional existing EC2 key pair name; when set, the instance accepts SSH on port 22. |
+| `EC2_STACK_NAME` | CloudFormation stack name. |
+| `EC2_REPOSITORY_URL` | Optional GitHub HTTPS or SSH-style URL; the script converts GitHub SSH remotes to token-free HTTPS. |
+| `EC2_REPOSITORY_REF` | Git branch or tag to clone. |
+| `EC2_GITHUB_TOKEN_SECRET_ARN` | Optional Secrets Manager ARN for a private repository's fine-grained read-only GitHub token. |
+| `EC2_SSH_ALLOWED_CIDR` | Optional IPv4 CIDR allowed to SSH on port 22 when `EC2_KEY_NAME` is set; defaults to `EC2_ALLOWED_CIDR`. |
+| `EC2_VPC_ID`, `EC2_SUBNET_ID` | Optional existing VPC and public subnet; both must be set together, otherwise the stack creates and later deletes its own minimal public VPC. |
+| `EC2_DETAILED_MONITORING` | `true` by default; set `false` to avoid the additional detailed-monitoring charge. |
+| `EC2_BOOTSTRAP_TIMEOUT_SECONDS` | Local health-wait timeout from 30 to 3,600 seconds; default 900. |
+
+For a private repository, create the read-only GitHub token in Secrets Manager without printing or committing it, then provide only its ARN:
+
+```powershell
+$env:EC2_GITHUB_TOKEN_SECRET_ARN = 'arn:aws:secretsmanager:me-south-1:123456789012:secret:github/edge-results-read-xxxxx'
+npm run ec2:provision
+```
+
+The command waits for EC2 status checks and `GET /health`, then prints the public base URL. Inspect the stack or connect to the host without opening port 22:
+
+```powershell
+npm run ec2:status
+npm run ec2:connect
+```
+
+If `EC2_KEY_NAME` was set during provisioning, `npm run ec2:status` also prints the SSH command shape. The private key itself is never stored in this repository; it remains the `.pem` file you originally created and downloaded for that EC2 key pair.
+
+Provision intentionally refuses to update an existing stack because EC2 user data runs only during the instance's initial boot. If the repository revision, generator CIDR, instance type, or bootstrap configuration changes, destroy the existing benchmark stack and provision a new one so every reported environment starts from the same clean process.
+
+Inside the Session Manager shell, bootstrap output and API logs are available through:
+
+```text
+sudo less /var/log/edge-results-bootstrap.log
+sudo journalctl -u edge-results-api.service --no-pager -n 200
+sudo docker ps --filter name=edge-results-postgres
+```
+
+Run k6 locally against the CloudFormation output, not against the old local API URL:
+
+```powershell
+$env:K6_TARGET = 'traditional'
+$env:K6_BASE_URL = aws cloudformation describe-stacks `
+  --stack-name edge-results-benchmark `
+  --region $env:AWS_REGION `
+  --profile $env:AWS_PROFILE `
+  --query "Stacks[0].Outputs[?OutputKey=='ApiBaseUrl'].OutputValue | [0]" `
+  --output text
+$env:K6_RUN_ID = 'traditional-ec2-load-1'
+$env:K6_GENERATOR_LOCATION = 'local-windows-damascus'
+npm run k6:load
+```
+
+Use the same local k6 machine, generator location, dataset version, request mix, and alternating run order for the deployed Worker. The EC2 endpoint currently uses HTTP while the Worker uses HTTPS, so the final report must disclose transport and network-path differences rather than attributing all latency differences solely to application architecture.
+
+Delete the stack promptly after the experiments. The confirmation value prevents an accidental deletion caused by merely running the command:
+
+```powershell
+$env:EC2_CONFIRM_DESTROY = 'edge-results-benchmark'
+npm run ec2:destroy
+```
+
+Deletion terminates the instance and deletes its root volume, security group, and stack-created IAM resources. Detailed monitoring, the instance, EBS, public IPv4, and Secrets Manager can incur charges while their resources exist; a separately created GitHub token secret is not owned or deleted by this stack.
 
 ## Benchmark methodology
 
