@@ -7,7 +7,7 @@ Traditional: k6 -> Fastify API -> PostgreSQL
 Edge:        k6 -> Cloudflare Worker -> Workers KV
 ```
 
-Phases 1 through 4 are implemented. The repository contains the shared behavior, synthetic dataset, PostgreSQL-backed traditional API, Cloudflare Worker backed only by Workers KV, equivalent k6 workload profiles, and a React interface for selecting either lookup path. The measured comparison report is intentionally deferred to Phase 5.
+Phases 1 through 4 are implemented. Phase 5 now includes a documented traditional EC2 capacity-discovery run and its raw artifacts; repeated final runs and the equivalent Cloudflare comparison remain pending. See [`docs/phase-5-traditional-ec2-report.md`](docs/phase-5-traditional-ec2-report.md).
 
 > All names, IDs, and results in this repository are deterministic synthetic data. Never import or test with real student data.
 
@@ -424,7 +424,7 @@ Deletion terminates the instance and deletes its root volume, security group, an
 
 ## Benchmark methodology
 
-The later benchmark implementation will follow these rules:
+The benchmark implementation follows these rules:
 
 1. Generate the corpus once, then publish that exact file to PostgreSQL and KV.
 2. Generate the k6 student-ID pool from the same corpus; do not create users independently inside each test.
@@ -516,17 +516,18 @@ The interface includes keyboard-operable backend selection, a required student-I
 - backend selector for Traditional or Edge
 - accessible loading, result, not-found, and failure states
 
-### Phase 5 — experiments and report
+### Phase 5 — experiments and report (in progress)
 
-- repeated controlled runs
-- raw result artifacts and comparison table
-- interpretation of saturation points, tail latency, errors, resource use, consistency, cost, and limitations
+- traditional EC2 private-VPC capacity discovery and raw artifacts documented
+- repeated controlled traditional runs still required
+- equivalent Cloudflare runs and final comparison table still required
+- final consistency, cost, and cross-architecture limitations analysis still required
 
 ## Current limitations
 
 - Workers KV is eventually consistent; the Worker is not suitable for immediate cross-region read-after-write workflows.
 - HMAC lookup keys reduce raw-ID exposure in KV tooling, but the unauthenticated demo endpoint is not a production privacy boundary.
-- No comparative performance result is claimed yet.
+- The traditional EC2 capacity result is documented, but no Cloudflare superiority or comparative performance result is claimed yet.
 - The schema models one result per student ID and one academic year for a focused read benchmark, not a production education domain.
 - There is no authentication. A real results system must add authorization, privacy controls, audit logging, key rotation, retention policy, and abuse protection.
 - Synthetic names intentionally repeat and must never be mistaken for a production-like identity model.

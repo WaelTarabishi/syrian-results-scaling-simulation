@@ -16,3 +16,4 @@ load-tests/generated/*.json
 # Benchmark output is local unless deliberately selected for publication.
 results/*
 !results/.gitkeep
+!results/traditional-private-*.summary.json
