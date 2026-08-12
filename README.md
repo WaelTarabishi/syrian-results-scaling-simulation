@@ -154,6 +154,7 @@ npm run db:down
 | `npm run k6:load` | Run the sustained 50 requests/second profile. |
 | `npm run k6:stress` | Ramp from 25 to 300 requests/second. |
 | `npm run k6:spike` | Jump from 20 to 400 requests/second and recover. |
+| `npm run k6:capacity` | Discover saturation by stepping from 500 to 5,000 requests/second. |
 | `npm run benchmark:capture:traditional` | Save PostgreSQL and container metrics for the current `K6_RUN_ID`. |
 | `npm run ec2:provision` | Provision and bootstrap the traditional API/PostgreSQL path on EC2. |
 | `npm run ec2:status` | Print the EC2 instance state, API URL, and Session Manager command. |
@@ -286,6 +287,8 @@ npm run k6:smoke
 ```
 
 Replace `k6:smoke` with `k6:load`, `k6:stress`, or `k6:spike`. Optional variables are `K6_MISS_PERCENT` (integer 0–100, default 5), `K6_REQUEST_TIMEOUT` (default `10s`), and `K6_DATASET_VERSION` (default `synthetic-v1`). Each run writes `results/<K6_RUN_ID>.summary.json` containing metadata, measured p50/p95/p99, achieved request rate, failures, checks, dropped iterations, hit/miss counts, and the full k6 end-of-test summary.
+
+The `k6:capacity` profile is intentionally aggressive. It offers 500, 1,000, 2,000, 3,000, 4,000, and 5,000 requests/second in successive 45-second stages, followed by a 30-second recovery. Run it only from a separate generator machine. Monitor CPU on both machines; insufficient VUs or an overloaded generator does not prove target saturation. Stop with `Ctrl+C` if SSH or the health endpoint becomes unavailable, and preserve the partial console output and server logs.
 
 Run each measured profile at least three times per target, alternate target order, and use unique IDs such as `traditional-load-1`, `edge-load-1`, `edge-load-2`, and `traditional-load-2`. Keep the generator machine and location, corpus, hit/miss ratio, traditional pool size, logging, and infrastructure unchanged.
 

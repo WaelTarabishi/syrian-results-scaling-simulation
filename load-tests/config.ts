@@ -1,7 +1,7 @@
 import type { Options, Scenario } from "k6/options";
 import { benchmarkEnvironment } from "./environment.ts";
 
-export type BenchmarkProfile = "smoke" | "load" | "stress" | "spike";
+export type BenchmarkProfile = "smoke" | "load" | "stress" | "spike" | "capacity";
 
 export interface BenchmarkProfileDetails {
   measuredDurationSeconds: number;
@@ -55,6 +55,22 @@ const measuredScenarios: Record<BenchmarkProfile, Scenario> = {
       { duration: "15s", target: 20 },
       { duration: "30s", target: 20 }
     ]
+  },
+  capacity: {
+    executor: "ramping-arrival-rate",
+    startRate: 500,
+    timeUnit: "1s",
+    preAllocatedVUs: 500,
+    maxVUs: 3_000,
+    stages: [
+      { duration: "45s", target: 500 },
+      { duration: "45s", target: 1_000 },
+      { duration: "45s", target: 2_000 },
+      { duration: "45s", target: 3_000 },
+      { duration: "45s", target: 4_000 },
+      { duration: "45s", target: 5_000 },
+      { duration: "30s", target: 0 }
+    ]
   }
 };
 
@@ -62,7 +78,11 @@ export const benchmarkProfileDetails: Record<BenchmarkProfile, BenchmarkProfileD
   smoke: { measuredDurationSeconds: 10, offeredLoad: "1 iteration/s for 10s" },
   load: { measuredDurationSeconds: 180, offeredLoad: "50 iterations/s for 3m" },
   stress: { measuredDurationSeconds: 270, offeredLoad: "25 to 300 iterations/s over 4m30s" },
-  spike: { measuredDurationSeconds: 110, offeredLoad: "20 to 400 iterations/s with a 30s peak" }
+  spike: { measuredDurationSeconds: 110, offeredLoad: "20 to 400 iterations/s with a 30s peak" },
+  capacity: {
+    measuredDurationSeconds: 300,
+    offeredLoad: "500 to 5,000 iterations/s in 45s stages, followed by a 30s recovery"
+  }
 };
 
 export function createBenchmarkOptions(profile: BenchmarkProfile): Options {
@@ -101,7 +121,7 @@ export function createBenchmarkOptions(profile: BenchmarkProfile): Options {
       "lookup_hits{phase:measured}": ["count>=0"],
       "lookup_misses{phase:measured}": ["count>=0"],
       "http_reqs{phase:measured}": ["count>0"],
-      "dropped_iterations{phase:measured}": ["count==0"]
+      dropped_iterations: ["count==0"]
     }
   };
 }

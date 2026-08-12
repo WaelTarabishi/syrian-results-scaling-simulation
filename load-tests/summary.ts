@@ -27,7 +27,7 @@ export function createSummaryHandler(profile: BenchmarkProfile) {
     const duration = values(data, `http_req_duration{${phase}}`);
     const failures = values(data, `http_req_failed{${phase}}`);
     const requests = values(data, `http_reqs{${phase}}`);
-    const drops = values(data, `dropped_iterations{${phase}}`);
+    const drops = values(data, "dropped_iterations");
     const checks = values(data, `checks{${phase}}`);
     const contractFailures = values(data, `lookup_contract_failures{${phase}}`);
     const hits = values(data, `lookup_hits{${phase}}`);

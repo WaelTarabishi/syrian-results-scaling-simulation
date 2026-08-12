@@ -38,6 +38,7 @@
     "k6:load": "k6 run load-tests/load.ts",
     "k6:stress": "k6 run load-tests/stress.ts",
     "k6:spike": "k6 run load-tests/spike.ts",
+    "k6:capacity": "k6 run load-tests/capacity.ts",
     "benchmark:capture:traditional": "tsx --env-file-if-exists=.env scripts/capture-traditional-metrics.ts",
     "ec2:provision": "tsx scripts/ec2-provision.ts provision",
     "ec2:status": "tsx scripts/ec2-provision.ts status",
