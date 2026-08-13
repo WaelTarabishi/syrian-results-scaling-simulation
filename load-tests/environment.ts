@@ -1,4 +1,8 @@
-export type BenchmarkTarget = "traditional" | "edge";
+import {
+  normalizeAndValidateBaseUrl,
+  validateRunIdTarget,
+  type BenchmarkTarget
+} from "./target-validation.ts";
 
 function required(name: string): string {
   const value = __ENV[name]?.trim();
@@ -23,19 +27,16 @@ function parseTarget(value: string): BenchmarkTarget {
   return value;
 }
 
-function parseBaseUrl(value: string): string {
-  if (!/^https?:\/\/[^/]/iu.test(value)) {
-    throw new Error("K6_BASE_URL must use http or https");
-  }
-  return value.replace(/\/+$/u, "");
-}
+const target = parseTarget(required("K6_TARGET"));
+const runId = __ENV.K6_RUN_ID?.trim();
+validateRunIdTarget(target, runId);
 
 export const benchmarkEnvironment = {
-  target: parseTarget(required("K6_TARGET")),
-  baseUrl: parseBaseUrl(required("K6_BASE_URL")),
+  target,
+  baseUrl: normalizeAndValidateBaseUrl(target, required("K6_BASE_URL")),
   missPercent: parseMissPercent(__ENV.K6_MISS_PERCENT),
   requestTimeout: __ENV.K6_REQUEST_TIMEOUT?.trim() || "10s",
   datasetVersion: __ENV.K6_DATASET_VERSION?.trim() || "synthetic-v1",
   generatorLocation: __ENV.K6_GENERATOR_LOCATION?.trim() || "unspecified",
-  runId: __ENV.K6_RUN_ID?.trim()
+  runId
 } as const;

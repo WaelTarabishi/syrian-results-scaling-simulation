@@ -155,6 +155,12 @@ npm run db:down
 | `npm run k6:stress` | Ramp from 25 to 300 requests/second. |
 | `npm run k6:spike` | Jump from 20 to 400 requests/second and recover. |
 | `npm run k6:capacity` | Discover saturation by stepping from 500 to 5,000 requests/second. |
+| `npm run k6:edge:smoke` | Run smoke against `EDGE_BASE_URL` with target-safe Edge metadata. |
+| `npm run k6:edge:load` | Run the shared sustained-load profile against `EDGE_BASE_URL`. |
+| `npm run k6:edge:stress` | Run the shared ramping-stress profile against `EDGE_BASE_URL`. |
+| `npm run k6:edge:spike` | Run the shared sudden-spike profile against `EDGE_BASE_URL`. |
+| `npm run k6:edge:capacity` | Run the shared capacity profile after explicit quota confirmation. |
+| `npm run benchmark:report` | Build a standalone visual report from every `results/*.summary.json` file. |
 | `npm run benchmark:capture:traditional` | Save PostgreSQL and container metrics for the current `K6_RUN_ID`. |
 | `npm run ec2:provision` | Provision and bootstrap the traditional API/PostgreSQL path on EC2. |
 | `npm run ec2:status` | Print the EC2 instance state, API URL, and Session Manager command. |
@@ -287,6 +293,41 @@ npm run k6:smoke
 ```
 
 Replace `k6:smoke` with `k6:load`, `k6:stress`, or `k6:spike`. Optional variables are `K6_MISS_PERCENT` (integer 0–100, default 5), `K6_REQUEST_TIMEOUT` (default `10s`), and `K6_DATASET_VERSION` (default `synthetic-v1`). Each run writes `results/<K6_RUN_ID>.summary.json` containing metadata, measured p50/p95/p99, achieved request rate, failures, checks, dropped iterations, hit/miss counts, and the full k6 end-of-test summary.
+
+### Edge comparison runs
+
+The Edge path uses the exact same k6 workload, synthetic fixture, expected 95% hit / 5% miss mix, response checks, thresholds, and profiles as the Traditional path. Only the target URL changes. Target-safe wrapper commands force `K6_TARGET=edge`, reject the Traditional local port, and create an `edge-<profile>-<timestamp>` run ID unless `K6_RUN_ID` is supplied:
+
+```powershell
+$env:EDGE_BASE_URL = 'https://edge-results-worker.<your-subdomain>.workers.dev'
+$env:K6_GENERATOR_LOCATION = 'your-fixed-generator-location'
+
+npm run k6:edge:smoke
+npm run k6:edge:load
+npm run k6:edge:stress
+npm run k6:edge:spike
+npm run benchmark:report
+```
+
+Run one profile at a time, allow recovery between profiles, and preserve unique result IDs. Repeat each Edge profile at least three times from the same generator and location used for the matching Traditional runs. Do not compare Edge smoke with Traditional stress or mix public/VPN Traditional artifacts with private-VPC results.
+
+The capacity profile can offer approximately 671,250 iterations and up to 5,000 requests/second. Confirm Cloudflare account quotas, authorization, cost, and generator capacity first. It requires an explicit guard:
+
+```powershell
+$env:EDGE_CONFIRM_CAPACITY = 'edge-capacity'
+npm run k6:edge:capacity
+```
+
+The report excludes summaries whose metadata contradicts their URL or run ID, while leaving their raw JSON untouched. This prevents a file such as `traditional-local-smoke-1` recorded with `target=edge` from contaminating Edge averages.
+
+Generate a human-readable report after one or more runs:
+
+```powershell
+npm run benchmark:report
+Start-Process results/benchmark-report.html
+```
+
+The self-contained `results/benchmark-report.html` includes target, profile, and run filters; offered-versus-achieved throughput; latency percentiles; threshold status; and links back to each raw summary. The HTML is a presentation layer only. Keep the JSON files because they are the reproducible source data and contain the complete k6 metrics needed for later analysis.
 
 The `k6:capacity` profile is intentionally aggressive. It offers 500, 1,000, 2,000, 3,000, 4,000, and 5,000 requests/second in successive 45-second stages, followed by a 30-second recovery. Run it only from a separate generator machine. Monitor CPU on both machines; insufficient VUs or an overloaded generator does not prove target saturation. Stop with `Ctrl+C` if SSH or the health endpoint becomes unavailable, and preserve the partial console output and server logs.
 

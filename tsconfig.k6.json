@@ -11,5 +11,6 @@
     "sourceMap": false,
     "types": ["k6"]
   },
-  "include": ["load-tests/**/*.ts"]
+  "include": ["load-tests/**/*.ts"],
+  "exclude": ["load-tests/**/*.test.ts"]
 }
