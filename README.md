@@ -318,7 +318,7 @@ $env:EDGE_CONFIRM_CAPACITY = 'edge-capacity'
 npm run k6:edge:capacity
 ```
 
-The report excludes summaries whose metadata contradicts their URL or run ID, while leaving their raw JSON untouched. This prevents a file such as `traditional-local-smoke-1` recorded with `target=edge` from contaminating Edge averages.
+The report displays only summaries whose `generatorLocation` metadata starts with `ec2-`. Local-machine runs and superseded timestamped Edge attempts (`edge-smoke-20260813-114914z`, `edge-load-20260813-115015z`, `edge-stress-20260813-115408z`, and `edge-spike-20260813-115856z`) remain available as raw JSON but are hidden from every report summary, filter, chart, and table. The report also excludes summaries whose metadata contradicts their URL or run ID.
 
 Generate a human-readable report after one or more runs:
 
@@ -327,7 +327,7 @@ npm run benchmark:report
 Start-Process results/benchmark-report.html
 ```
 
-The self-contained `results/benchmark-report.html` includes target, profile, and run filters; offered-versus-achieved throughput; latency percentiles; threshold status; and links back to each raw summary. The HTML is a presentation layer only. Keep the JSON files because they are the reproducible source data and contain the complete k6 metrics needed for later analysis.
+The self-contained `results/benchmark-report.html` includes an EC2-only executive comparison, target/profile/run filters, offered-versus-achieved throughput, latency percentiles, threshold status, and links back to each displayed EC2 summary. The HTML is a presentation layer only. Keep all JSON files because they are the reproducible source data and contain the complete k6 metrics needed for later analysis.
 
 The `k6:capacity` profile is intentionally aggressive. It offers 500, 1,000, 2,000, 3,000, 4,000, and 5,000 requests/second in successive 45-second stages, followed by a 30-second recovery. Run it only from a separate generator machine. Monitor CPU on both machines; insufficient VUs or an overloaded generator does not prove target saturation. Stop with `Ctrl+C` if SSH or the health endpoint becomes unavailable, and preserve the partial console output and server logs.
 

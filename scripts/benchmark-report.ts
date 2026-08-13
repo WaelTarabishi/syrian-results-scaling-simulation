@@ -9,6 +9,7 @@ export interface BenchmarkRun {
   fileName: string;
   runId: string;
   recordedAt: string;
+  generatorLocation: string;
   target: BenchmarkTarget;
   profile: BenchmarkProfile;
   offeredLoad: string;
@@ -39,6 +40,92 @@ const OFFERED_AVERAGE_RPS: Record<BenchmarkProfile, number> = {
   spike: 17_400 / 110,
   capacity: 671_250 / 300
 };
+
+const FINAL_COMPARISON_RUNS = [
+  {
+    profile: "stress" as const,
+    title: "Gradually increasing traffic",
+    traditionalRunId: "traditional-private-stress-1",
+    edgeRunId: "edge-ec2-stress-1"
+  },
+  {
+    profile: "spike" as const,
+    title: "Sudden traffic surge",
+    traditionalRunId: "traditional-private-spike-1",
+    edgeRunId: "edge-ec2-spike-1"
+  }
+];
+
+const EXCLUDED_DIAGNOSTIC_RUN_IDS = new Set([
+  "edge-load-20260813-115015z",
+  "edge-smoke-20260813-114914z",
+  "edge-spike-20260813-115856z",
+  "edge-stress-20260813-115408z"
+]);
+
+export interface FinalComparisonScenario {
+  profile: "stress" | "spike";
+  title: string;
+  traditional: BenchmarkRun;
+  edge: BenchmarkRun;
+}
+
+export function selectFinalComparisonScenarios(runs: BenchmarkRun[]): FinalComparisonScenario[] {
+  return FINAL_COMPARISON_RUNS.flatMap((definition) => {
+    const traditional = runs.find(
+      (run) => run.runId === definition.traditionalRunId && run.target === "traditional" && run.profile === definition.profile && run.validationIssues.length === 0
+    );
+    const edge = runs.find(
+      (run) => run.runId === definition.edgeRunId && run.target === "edge" && run.profile === definition.profile && run.validationIssues.length === 0
+    );
+    return traditional && edge ? [{ profile: definition.profile, title: definition.title, traditional, edge }] : [];
+  });
+}
+
+function formatReportNumber(value: number, maximumFractionDigits = 2): string {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits }).format(value);
+}
+
+function createFinalComparisonHtml(runs: BenchmarkRun[]): string {
+  const scenarios = selectFinalComparisonScenarios(runs);
+  if (scenarios.length === 0) {
+    return `<section class="final-comparison" aria-labelledby="final-title"><div class="final-heading"><p class="eyebrow">Executive summary</p><h2 id="final-title">Final comparison</h2><p>Matched EC2 results are not available yet. The technical runs remain available below.</p></div></section>`;
+  }
+
+  const cards = scenarios.map(({ profile, title, traditional, edge }) => {
+    const maximumLatency = Math.max(traditional.p95Ms, edge.p95Ms, 1);
+    const latencyRatio = edge.p95Ms / Math.max(traditional.p95Ms, 0.001);
+    const totalScheduled = edge.requestCount + edge.droppedIterations;
+    const trafficDifference = Math.abs(traditional.achievedRps - edge.achievedRps);
+    const trafficSummary = trafficDifference < 0.1
+      ? `Both completed about ${formatReportNumber((traditional.achievedRps + edge.achievedRps) / 2)} requests each second.`
+      : `Traditional completed ${formatReportNumber(traditional.achievedRps)} and Edge completed ${formatReportNumber(edge.achievedRps)} requests each second.`;
+    const reliabilitySummary = traditional.httpFailureRate === 0 && edge.httpFailureRate === 0
+      ? "No HTTP requests failed."
+      : `HTTP failures: Traditional ${formatReportNumber(traditional.httpFailureRate * 100)}%; Edge ${formatReportNumber(edge.httpFailureRate * 100)}%.`;
+    const droppedSummary = edge.droppedIterations === 0
+      ? "Every scheduled lookup was started."
+      : `${formatReportNumber(edge.droppedIterations, 0)} of ${formatReportNumber(totalScheduled, 0)} scheduled Edge lookups were not started.`;
+
+    return `<article class="comparison-card">
+      <div class="scenario-heading"><span class="scenario-number">${profile === "stress" ? "01" : "02"}</span><div><p>${profile === "stress" ? "Stress test" : "Spike test"}</p><h3>${title}</h3></div><span class="outcome-pill">Both stayed available</span></div>
+      <div class="plain-metric"><div class="plain-metric-heading"><h4>Response time</h4><p>95 out of 100 responses finished within:</p></div>
+        <div class="comparison-bars">
+          <div class="comparison-row"><span>Traditional</span><div class="comparison-track"><div class="comparison-fill traditional-fill" style="width:${Math.max(1.5, traditional.p95Ms / maximumLatency * 100)}%"></div></div><strong>${formatReportNumber(traditional.p95Ms)} ms</strong></div>
+          <div class="comparison-row"><span>Edge</span><div class="comparison-track"><div class="comparison-fill edge-fill" style="width:${Math.max(1.5, edge.p95Ms / maximumLatency * 100)}%"></div></div><strong>${formatReportNumber(edge.p95Ms)} ms</strong></div>
+        </div>
+        <p class="speed-result">Traditional had about <strong>${formatReportNumber(latencyRatio, 0)}× lower response time</strong> in this run.</p>
+      </div>
+      <div class="plain-facts"><div><span>Traffic handled</span><strong>${trafficSummary}</strong></div><div><span>Reliability</span><strong>${reliabilitySummary} ${droppedSummary}</strong></div></div>
+    </article>`;
+  }).join("");
+
+  return `<section class="final-comparison" aria-labelledby="final-title">
+    <div class="final-heading"><div><p class="eyebrow">Executive summary</p><h2 id="final-title">Final comparison</h2><p>The simplest answer from the matched EC2 runs.</p></div><div class="verdict"><strong>Both handled the tests reliably.</strong><span>Traditional returned responses much faster in this setup.</span></div></div>
+    <div class="comparison-grid">${cards}</div>
+    <div class="scope-notes"><div><strong>What was compared</strong><span>The same Stress and Spike profiles, generated from EC2 in us-east-1.</span></div><div><strong>Important difference</strong><span>Traditional used private VPC HTTP; Edge used public HTTPS. The test shows end-to-end user experience, not architecture alone.</span></div><div><strong>Not compared</strong><span>Load has no matching Traditional private run. Edge Capacity was skipped to protect the 100,000-request daily allowance.</span></div></div>
+  </section>`;
+}
 
 function requiredString(value: unknown, field: string, fileName: string): string {
   if (typeof value !== "string" || value.length === 0) {
@@ -93,6 +180,7 @@ export function parseBenchmarkRun(contents: string, fileName: string): Benchmark
     fileName: basename(fileName),
     runId,
     recordedAt: requiredString(metadata.recordedAt, "metadata.recordedAt", fileName),
+    generatorLocation: requiredString(metadata.generatorLocation, "metadata.generatorLocation", fileName),
     target,
     profile,
     offeredLoad: requiredString(metadata.offeredLoad, "metadata.offeredLoad", fileName),
@@ -112,6 +200,12 @@ export function parseBenchmarkRun(contents: string, fileName: string): Benchmark
   };
 }
 
+export function selectEc2Runs(runs: BenchmarkRun[]): BenchmarkRun[] {
+  return runs.filter(
+    (run) => run.generatorLocation.toLowerCase().startsWith("ec2-") && !EXCLUDED_DIAGNOSTIC_RUN_IDS.has(run.runId)
+  );
+}
+
 export async function loadBenchmarkRuns(resultsDirectory: string): Promise<BenchmarkRun[]> {
   const names = (await readdir(resultsDirectory)).filter((name) => name.endsWith(".summary.json")).sort();
   return Promise.all(names.map(async (name) => parseBenchmarkRun(await readFile(join(resultsDirectory, name), "utf8"), name)));
@@ -124,13 +218,15 @@ function serializeForInlineScript(value: unknown): string {
 export function createBenchmarkReportHtml(runs: BenchmarkRun[]): string {
   if (runs.length === 0) throw new Error("At least one benchmark summary is required to generate the report");
   const data = serializeForInlineScript(runs);
+  const finalComparison = createFinalComparisonHtml(runs);
   return `<!doctype html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Benchmark results</title>
+<title>EC2 benchmark results</title>
 <style>
-:root{color-scheme:light;--ink:#0f172a;--muted:#64748b;--line:#dbe2ea;--soft:#f5f8fb;--traditional:#0759c7;--edge:#079d9a;--danger:#cf2e2e;--good:#15803d}*{box-sizing:border-box}body{margin:0;background:#fff;color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,select{font:inherit}.page{width:min(1500px,calc(100% - 40px));margin:auto;padding:34px 0 48px}header{margin-bottom:26px}h1{margin:0 0 8px;font-size:clamp(2rem,4vw,3.25rem);line-height:.98;letter-spacing:-.045em}.lede{max-width:830px;margin:0;color:var(--muted);line-height:1.55}.filters{display:grid;grid-template-columns:repeat(3,minmax(160px,220px));gap:14px;align-items:end;margin-bottom:12px}label{display:grid;gap:7px;color:#334155;font-size:.78rem;font-weight:700;letter-spacing:.02em}select{min-height:42px;padding:0 38px 0 12px;color:var(--ink);background:#fff;border:1px solid #cbd5e1;border-radius:6px}select:focus-visible,a:focus-visible{outline:3px solid #93c5fd;outline-offset:2px}.match-count{margin:0 0 18px;color:var(--muted);font-size:.9rem}.metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));border:1px solid var(--line);border-radius:8px 8px 0 0;overflow:hidden}.metric{min-width:0;padding:18px 14px;border-right:1px solid var(--line);overflow:hidden;text-align:center}.metric:last-child{border-right:0}.metric-label{min-height:34px;color:#334155;font-size:.82rem}.metric-value{display:block;margin-top:4px;font-size:clamp(1.3rem,2.4vw,2rem);font-variant-numeric:tabular-nums;letter-spacing:-.035em}.metric-unit{color:var(--muted);font-size:.75rem}.visuals{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);border:1px solid var(--line);border-top:0}.visual{min-width:0;padding:22px}.visual+.visual{border-left:1px solid var(--line)}.section-title{margin:0;font-size:1rem}.section-note{margin:3px 0 18px;color:var(--muted);font-size:.8rem}.legend{display:flex;gap:16px;margin-bottom:16px;color:#334155;font-size:.75rem}.legend span:before{content:"";display:inline-block;width:9px;height:9px;margin-right:6px;border-radius:2px;background:var(--swatch)}.chart{display:grid;gap:13px}.chart-row{display:grid;grid-template-columns:minmax(115px,180px) minmax(0,1fr);gap:12px;align-items:center}.chart-label{overflow:hidden;color:#334155;font-size:.72rem;text-overflow:ellipsis;white-space:nowrap}.bars{display:grid;gap:4px}.bar-track{position:relative;height:19px;background:var(--soft);border-radius:3px}.bar{height:100%;min-width:2px;border-radius:3px;background:var(--bar-color)}.bar-value{position:absolute;inset:2px auto auto 7px;color:#fff;font-size:.68rem;font-weight:700;font-variant-numeric:tabular-nums;text-shadow:0 1px 1px rgb(0 0 0/25%)}.latency-values{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}.latency-value{padding:7px 8px;border-left:3px solid var(--target-color);overflow:hidden;background:var(--soft);font-size:.7rem;font-variant-numeric:tabular-nums}.latency-value b{display:block;margin-bottom:2px;color:var(--muted);font-size:.62rem;text-transform:uppercase}.runs{border:1px solid var(--line);border-top:0;overflow-x:auto}.runs-heading{display:flex;justify-content:space-between;gap:20px;padding:18px 20px 12px}table{width:100%;border-collapse:collapse;font-size:.76rem;font-variant-numeric:tabular-nums}th,td{padding:10px 12px;border-top:1px solid var(--line);text-align:right;white-space:nowrap}th{color:#475569;background:var(--soft);font-size:.68rem;letter-spacing:.025em;text-transform:uppercase}th:first-child,td:first-child,th:nth-child(2),td:nth-child(2),th:nth-child(3),td:nth-child(3){text-align:left}tbody tr:hover{background:#f8fafc}.target-mark{display:inline-block;width:8px;height:8px;margin-right:7px;border-radius:50%;background:var(--target-color)}.status{color:var(--status-color);font-weight:700}.json-link{color:#0759c7;text-underline-offset:2px}.explain{display:grid;grid-template-columns:auto 1fr;gap:14px;margin-top:18px;padding:18px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff}.explain-icon{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;color:#fff;background:#0759c7;font-weight:800}.explain h2{margin:0 0 4px;font-size:.9rem}.explain p{margin:0;color:#334155;font-size:.8rem;line-height:1.55}.empty{padding:40px 20px;color:var(--muted);text-align:center}@media(max-width:980px){.metrics{grid-template-columns:repeat(3,minmax(0,1fr))}.metric:nth-child(3){border-right:0}.metric:nth-child(-n+3){border-bottom:1px solid var(--line)}.visuals{grid-template-columns:minmax(0,1fr)}.visual+.visual{border-top:1px solid var(--line);border-left:0}}@media(max-width:680px){.page{width:calc(100% - 24px);padding-top:24px}.filters{grid-template-columns:minmax(0,1fr)}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.metric:nth-child(3){border-right:1px solid var(--line)}.metric:nth-child(2n){border-right:0}.metric:nth-child(-n+4){border-bottom:1px solid var(--line)}.chart-row{grid-template-columns:90px minmax(0,1fr)}.metric{padding-inline:8px}.metric-label{font-size:.72rem}.metric-value{font-size:1.25rem}.metric-unit{font-size:.67rem}}
+:root{color-scheme:light;--ink:#0f172a;--muted:#64748b;--line:#dbe2ea;--soft:#f5f8fb;--traditional:#0759c7;--edge:#079d9a;--danger:#cf2e2e;--good:#15803d}*{box-sizing:border-box}body{margin:0;background:#fff;color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,select{font:inherit}.page{width:min(1500px,calc(100% - 40px));margin:auto;padding:34px 0 48px}header{margin-bottom:26px}h1{margin:0 0 8px;font-size:clamp(2rem,4vw,3.25rem);line-height:.98;letter-spacing:-.045em}.lede{max-width:830px;margin:0;color:var(--muted);line-height:1.55}.final-comparison{margin-bottom:42px;padding:clamp(22px,3vw,38px);border:1px solid #cbd5e1;border-radius:18px;background:linear-gradient(135deg,#f8fafc 0%,#fff 62%);box-shadow:0 18px 45px rgb(15 23 42/7%)}.final-heading{display:flex;justify-content:space-between;gap:28px;align-items:end;margin-bottom:24px}.final-heading h2{margin:2px 0 5px;font-size:clamp(1.7rem,3vw,2.5rem);letter-spacing:-.035em}.final-heading p{margin:0;color:var(--muted)}.eyebrow{color:var(--traditional)!important;font-size:.7rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase}.verdict{display:grid;gap:3px;max-width:500px;padding:14px 18px;border-left:4px solid var(--good);background:#f0fdf4}.verdict strong{font-size:1rem}.verdict span{color:#334155;font-size:.86rem}.comparison-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.comparison-card{padding:22px;border:1px solid var(--line);border-radius:12px;background:#fff}.scenario-heading{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding-bottom:18px;border-bottom:1px solid var(--line)}.scenario-number{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;color:#fff;background:var(--ink);font-size:.72rem;font-weight:800}.scenario-heading p{margin:0;color:var(--muted);font-size:.72rem;font-weight:700;text-transform:uppercase}.scenario-heading h3{margin:2px 0 0;font-size:1rem}.outcome-pill{padding:6px 9px;border-radius:999px;color:#166534;background:#dcfce7;font-size:.68rem;font-weight:800}.plain-metric{padding:20px 0}.plain-metric-heading{display:flex;justify-content:space-between;gap:16px;align-items:baseline}.plain-metric-heading h4{margin:0;font-size:.92rem}.plain-metric-heading p{margin:0;color:var(--muted);font-size:.76rem}.comparison-bars{display:grid;gap:11px;margin-top:14px}.comparison-row{display:grid;grid-template-columns:76px minmax(0,1fr) 78px;gap:10px;align-items:center;font-size:.78rem}.comparison-row strong{text-align:right;font-variant-numeric:tabular-nums}.comparison-track{height:18px;border-radius:4px;background:#edf2f7;overflow:hidden}.comparison-fill{height:100%;border-radius:4px}.traditional-fill{background:var(--traditional)}.edge-fill{background:var(--edge)}.speed-result{margin:13px 0 0;color:#334155;font-size:.8rem}.plain-facts{display:grid;grid-template-columns:1fr 1fr;gap:10px}.plain-facts div{display:grid;align-content:start;gap:5px;padding:13px;border-radius:8px;background:var(--soft)}.plain-facts span{color:var(--muted);font-size:.68rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase}.plain-facts strong{font-size:.77rem;line-height:1.45}.scope-notes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;margin-top:18px;overflow:hidden;border:1px solid var(--line);border-radius:9px;background:var(--line)}.scope-notes div{display:grid;gap:4px;padding:13px;background:#fff}.scope-notes strong{font-size:.72rem}.scope-notes span{color:var(--muted);font-size:.7rem;line-height:1.45}.filters{display:grid;grid-template-columns:repeat(3,minmax(160px,220px));gap:14px;align-items:end;margin-bottom:12px}label{display:grid;gap:7px;color:#334155;font-size:.78rem;font-weight:700;letter-spacing:.02em}select{min-height:42px;padding:0 38px 0 12px;color:var(--ink);background:#fff;border:1px solid #cbd5e1;border-radius:6px}select:focus-visible,a:focus-visible{outline:3px solid #93c5fd;outline-offset:2px}.match-count{margin:0 0 18px;color:var(--muted);font-size:.9rem}.metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));border:1px solid var(--line);border-radius:8px 8px 0 0;overflow:hidden}.metric{min-width:0;padding:18px 14px;border-right:1px solid var(--line);overflow:hidden;text-align:center}.metric:last-child{border-right:0}.metric-label{min-height:34px;color:#334155;font-size:.82rem}.metric-value{display:block;margin-top:4px;font-size:clamp(1.3rem,2.4vw,2rem);font-variant-numeric:tabular-nums;letter-spacing:-.035em}.metric-unit{color:var(--muted);font-size:.75rem}.visuals{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);border:1px solid var(--line);border-top:0}.visual{min-width:0;padding:22px}.visual+.visual{border-left:1px solid var(--line)}.section-title{margin:0;font-size:1rem}.section-note{margin:3px 0 18px;color:var(--muted);font-size:.8rem}.legend{display:flex;gap:16px;margin-bottom:16px;color:#334155;font-size:.75rem}.legend span:before{content:"";display:inline-block;width:9px;height:9px;margin-right:6px;border-radius:2px;background:var(--swatch)}.chart{display:grid;gap:13px}.chart-row{display:grid;grid-template-columns:minmax(115px,180px) minmax(0,1fr);gap:12px;align-items:center}.chart-label{overflow:hidden;color:#334155;font-size:.72rem;text-overflow:ellipsis;white-space:nowrap}.bars{display:grid;gap:4px}.bar-track{position:relative;height:19px;background:var(--soft);border-radius:3px}.bar{height:100%;min-width:2px;border-radius:3px;background:var(--bar-color)}.bar-value{position:absolute;inset:2px auto auto 7px;color:#fff;font-size:.68rem;font-weight:700;font-variant-numeric:tabular-nums;text-shadow:0 1px 1px rgb(0 0 0/25%)}.latency-values{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}.latency-value{padding:7px 8px;border-left:3px solid var(--target-color);overflow:hidden;background:var(--soft);font-size:.7rem;font-variant-numeric:tabular-nums}.latency-value b{display:block;margin-bottom:2px;color:var(--muted);font-size:.62rem;text-transform:uppercase}.runs{border:1px solid var(--line);border-top:0;overflow-x:auto}.runs-heading{display:flex;justify-content:space-between;gap:20px;padding:18px 20px 12px}table{width:100%;border-collapse:collapse;font-size:.76rem;font-variant-numeric:tabular-nums}th,td{padding:10px 12px;border-top:1px solid var(--line);text-align:right;white-space:nowrap}th{color:#475569;background:var(--soft);font-size:.68rem;letter-spacing:.025em;text-transform:uppercase}th:first-child,td:first-child,th:nth-child(2),td:nth-child(2),th:nth-child(3),td:nth-child(3){text-align:left}tbody tr:hover{background:#f8fafc}.target-mark{display:inline-block;width:8px;height:8px;margin-right:7px;border-radius:50%;background:var(--target-color)}.status{color:var(--status-color);font-weight:700}.json-link{color:#0759c7;text-underline-offset:2px}.explain{display:grid;grid-template-columns:auto 1fr;gap:14px;margin-top:18px;padding:18px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff}.explain-icon{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;color:#fff;background:#0759c7;font-weight:800}.explain h2{margin:0 0 4px;font-size:.9rem}.explain p{margin:0;color:#334155;font-size:.8rem;line-height:1.55}.empty{padding:40px 20px;color:var(--muted);text-align:center}@media(max-width:980px){.comparison-grid{grid-template-columns:minmax(0,1fr)}.scope-notes{grid-template-columns:minmax(0,1fr)}.metrics{grid-template-columns:repeat(3,minmax(0,1fr))}.metric:nth-child(3){border-right:0}.metric:nth-child(-n+3){border-bottom:1px solid var(--line)}.visuals{grid-template-columns:minmax(0,1fr)}.visual+.visual{border-top:1px solid var(--line);border-left:0}}@media(max-width:680px){.page{width:calc(100% - 24px);padding-top:24px}.final-comparison{padding:18px 14px}.final-heading{display:grid;align-items:start}.scenario-heading{grid-template-columns:auto 1fr}.outcome-pill{grid-column:2}.plain-metric-heading{display:grid;gap:3px}.comparison-row{grid-template-columns:62px minmax(0,1fr) 66px}.plain-facts{grid-template-columns:minmax(0,1fr)}.filters{grid-template-columns:minmax(0,1fr)}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.metric:nth-child(3){border-right:1px solid var(--line)}.metric:nth-child(2n){border-right:0}.metric:nth-child(-n+4){border-bottom:1px solid var(--line)}.chart-row{grid-template-columns:90px minmax(0,1fr)}.metric{padding-inline:8px}.metric-label{font-size:.72rem}.metric-value{font-size:1.25rem}.metric-unit{font-size:.67rem}}
 </style></head><body><main class="page">
-<header><h1>Benchmark results</h1><p class="lede">A readable view of the k6 runs comparing the Traditional API/PostgreSQL path with the Edge Worker/KV path. Raw JSON remains the source of truth.</p></header>
+<header><h1>EC2 benchmark results</h1><p class="lede">Traditional API/PostgreSQL and Edge Worker/KV results generated from the EC2 test machine. Local-machine tests are intentionally hidden. Raw JSON remains the source of truth.</p></header>
+${finalComparison}
 <section class="filters" aria-label="Report filters"><label>Target<select id="target-filter"><option value="all">All targets</option><option value="traditional">Traditional</option><option value="edge">Edge</option></select></label><label>Profile<select id="profile-filter"><option value="all">All profiles</option><option value="smoke">Smoke</option><option value="load">Load</option><option value="stress">Stress</option><option value="spike">Spike</option><option value="capacity">Capacity</option></select></label><label>Run<select id="run-filter"><option value="all">All runs</option></select></label></section><p class="match-count" id="match-count"></p>
 <div id="excluded-data"></div>
 <section class="metrics" aria-label="Selected-run summary"><div class="metric"><div class="metric-label">Offered RPS <span class="aggregate">(average)</span></div><strong class="metric-value" id="offered-rps">—</strong><span class="metric-unit">requests/second</span></div><div class="metric"><div class="metric-label">Achieved RPS <span class="aggregate">(average)</span></div><strong class="metric-value" id="achieved-rps">—</strong><span class="metric-unit">requests/second</span></div><div class="metric"><div class="metric-label">p95 latency <span class="aggregate">(average)</span></div><strong class="metric-value" id="p95">—</strong><span class="metric-unit">milliseconds</span></div><div class="metric"><div class="metric-label">p99 latency <span class="aggregate">(average)</span></div><strong class="metric-value" id="p99">—</strong><span class="metric-unit">milliseconds</span></div><div class="metric"><div class="metric-label">HTTP failure rate <span class="aggregate">(average)</span></div><strong class="metric-value" id="failure-rate">—</strong><span class="metric-unit">of requests</span></div><div class="metric"><div class="metric-label">Dropped iterations <span id="drop-aggregate">(sum)</span></div><strong class="metric-value" id="dropped">—</strong><span class="metric-unit">not started</span></div></section>
