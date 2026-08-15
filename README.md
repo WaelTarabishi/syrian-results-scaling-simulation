@@ -7,6 +7,8 @@ Traditional: k6 -> Fastify API -> PostgreSQL
 Edge:        k6 -> Cloudflare Worker -> Workers KV
 ```
 
+The project asks whether static, read-heavy result publication is an operationally better fit for a managed Edge Worker/KV path than for a dedicated API/PostgreSQL deployment during sudden demand. It does not try to prove that one architecture executes every request faster. Latency is retained as a service-level threshold; traffic completion, failures, dropped work, saturation, and infrastructure responsibility drive the conclusion.
+
 Phases 1 through 4 are implemented. Phase 5 now includes a documented traditional EC2 capacity-discovery run and its raw artifacts; repeated final runs and the equivalent Cloudflare comparison remain pending. See [`docs/phase-5-traditional-ec2-report.md`](docs/phase-5-traditional-ec2-report.md).
 
 > All names, IDs, and results in this repository are deterministic synthetic data. Never import or test with real student data.
@@ -160,6 +162,7 @@ npm run db:down
 | `npm run k6:edge:stress` | Run the shared ramping-stress profile against `EDGE_BASE_URL`. |
 | `npm run k6:edge:spike` | Run the shared sudden-spike profile against `EDGE_BASE_URL`. |
 | `npm run k6:edge:capacity` | Run the shared capacity profile after explicit quota confirmation. |
+| `npm run k6:edge:reliability` | Run exactly 4,000,000 measured Edge lookups over one hour after paid-plan confirmation. |
 | `npm run benchmark:report` | Build a standalone visual report from every `results/*.summary.json` file. |
 | `npm run benchmark:capture:traditional` | Save PostgreSQL and container metrics for the current `K6_RUN_ID`. |
 | `npm run ec2:provision` | Provision and bootstrap the traditional API/PostgreSQL path on EC2. |
@@ -318,6 +321,25 @@ $env:EDGE_CONFIRM_CAPACITY = 'edge-capacity'
 npm run k6:edge:capacity
 ```
 
+### Edge four-million-request reliability run
+
+The dedicated Edge reliability profile schedules exactly 4,000,000 measured lookups over one hour: 10,000 iterations every 9 seconds, equivalent to 1,111.11 requests/second. Its 10-second warm-up adds 50 requests, so budget at least 4,000,050 Worker requests and approximately 4,000,050 KV reads. This leaves 999,950 operations from a five-million-operation test budget.
+
+Run it from the EC2 generator only after enabling Workers Paid and checking the current monthly Worker-request and KV-read usage in Cloudflare:
+
+```bash
+cd ~/syrian-results-scaling-simulation
+
+export EDGE_BASE_URL='https://edge-results-worker.waeltarabishi.workers.dev'
+export K6_GENERATOR_LOCATION='ec2-us-east-1'
+export K6_RUN_ID='edge-ec2-reliability-4m-1'
+export EDGE_CONFIRM_RELIABILITY='edge-4m-hour'
+
+npm run k6:edge:reliability
+```
+
+Keep the SSH session open and monitor EC2 CPU/memory plus Cloudflare Worker errors during the entire hour. A valid successful result requires zero dropped iterations, HTTP and contract failure rates below 0.1%, more than 99.9% successful checks, p95 below one second, and p99 below two seconds. Do not describe an interrupted or generator-saturated run as an Edge capacity failure.
+
 The report displays only summaries whose `generatorLocation` metadata starts with `ec2-`. Local-machine runs and superseded timestamped Edge attempts (`edge-smoke-20260813-114914z`, `edge-load-20260813-115015z`, `edge-stress-20260813-115408z`, and `edge-spike-20260813-115856z`) remain available as raw JSON but are hidden from every report summary, filter, chart, and table. The report also excludes summaries whose metadata contradicts their URL or run ID.
 
 Generate a human-readable report after one or more runs:
@@ -327,7 +349,7 @@ npm run benchmark:report
 Start-Process results/benchmark-report.html
 ```
 
-The self-contained `results/benchmark-report.html` includes an EC2-only executive comparison, target/profile/run filters, offered-versus-achieved throughput, latency percentiles, threshold status, and links back to each displayed EC2 summary. The HTML is a presentation layer only. Keep all JSON files because they are the reproducible source data and contain the complete k6 metrics needed for later analysis.
+The self-contained `results/benchmark-report.html` includes an EC2-only load-handling and operational-fit summary, target/profile/run filters, offered-versus-achieved throughput, latency SLO evidence, threshold status, and links back to each displayed EC2 summary. It reports the observed Traditional capacity boundary separately and explicitly leaves Edge maximum capacity unknown because that profile was not run. The HTML is a presentation layer only. Keep all JSON files because they are the reproducible source data and contain the complete k6 metrics needed for later analysis.
 
 The `k6:capacity` profile is intentionally aggressive. It offers 500, 1,000, 2,000, 3,000, 4,000, and 5,000 requests/second in successive 45-second stages, followed by a 30-second recovery. Run it only from a separate generator machine. Monitor CPU on both machines; insufficient VUs or an overloaded generator does not prove target saturation. Stop with `Ctrl+C` if SSH or the health endpoint becomes unavailable, and preserve the partial console output and server logs.
 

@@ -44,6 +44,7 @@
     "k6:edge:stress": "tsx scripts/run-edge-benchmark.ts stress",
     "k6:edge:spike": "tsx scripts/run-edge-benchmark.ts spike",
     "k6:edge:capacity": "tsx scripts/run-edge-benchmark.ts capacity",
+    "k6:edge:reliability": "tsx scripts/run-edge-benchmark.ts reliability",
     "benchmark:report": "tsx scripts/generate-benchmark-report.ts",
     "benchmark:capture:traditional": "tsx --env-file-if-exists=.env scripts/capture-traditional-metrics.ts",
     "ec2:provision": "tsx scripts/ec2-provision.ts provision",

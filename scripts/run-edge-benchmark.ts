@@ -3,12 +3,12 @@ import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 import { normalizeAndValidateBaseUrl, validateRunIdTarget } from "../load-tests/target-validation.js";
 
-type EdgeProfile = "smoke" | "load" | "stress" | "spike" | "capacity";
+type EdgeProfile = "smoke" | "load" | "stress" | "spike" | "capacity" | "reliability";
 
-const supportedProfiles = new Set<EdgeProfile>(["smoke", "load", "stress", "spike", "capacity"]);
+const supportedProfiles = new Set<EdgeProfile>(["smoke", "load", "stress", "spike", "capacity", "reliability"]);
 const requestedProfile = process.argv[2];
 if (!requestedProfile || !supportedProfiles.has(requestedProfile as EdgeProfile)) {
-  throw new Error("Usage: tsx scripts/run-edge-benchmark.ts <smoke|load|stress|spike|capacity>");
+  throw new Error("Usage: tsx scripts/run-edge-benchmark.ts <smoke|load|stress|spike|capacity|reliability>");
 }
 const profile = requestedProfile as EdgeProfile;
 
@@ -21,6 +21,12 @@ const baseUrl = normalizeAndValidateBaseUrl("edge", baseUrlValue);
 if (profile === "capacity" && process.env.EDGE_CONFIRM_CAPACITY !== "edge-capacity") {
   throw new Error(
     "Capacity can offer up to 5,000 RPS and approximately 671,250 iterations. Set EDGE_CONFIRM_CAPACITY=edge-capacity after confirming the account quota and test authorization."
+  );
+}
+
+if (profile === "reliability" && process.env.EDGE_CONFIRM_RELIABILITY !== "edge-4m-hour") {
+  throw new Error(
+    "Reliability schedules 4,000,000 measured requests over one hour plus 50 warm-up requests. Set EDGE_CONFIRM_RELIABILITY=edge-4m-hour only after enabling Workers Paid, confirming at least 4,000,050 Worker requests and KV reads remain, and verifying EC2 generator capacity."
   );
 }
 

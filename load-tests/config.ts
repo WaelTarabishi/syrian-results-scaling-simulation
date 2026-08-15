@@ -1,7 +1,7 @@
 import type { Options, Scenario } from "k6/options";
 import { benchmarkEnvironment } from "./environment.ts";
 
-export type BenchmarkProfile = "smoke" | "load" | "stress" | "spike" | "capacity";
+export type BenchmarkProfile = "smoke" | "load" | "stress" | "spike" | "capacity" | "reliability";
 
 export interface BenchmarkProfileDetails {
   measuredDurationSeconds: number;
@@ -71,6 +71,14 @@ const measuredScenarios: Record<BenchmarkProfile, Scenario> = {
       { duration: "45s", target: 5_000 },
       { duration: "30s", target: 0 }
     ]
+  },
+  reliability: {
+    executor: "constant-arrival-rate",
+    rate: 10_000,
+    timeUnit: "9s",
+    duration: "1h",
+    preAllocatedVUs: 250,
+    maxVUs: 2_000
   }
 };
 
@@ -82,10 +90,25 @@ export const benchmarkProfileDetails: Record<BenchmarkProfile, BenchmarkProfileD
   capacity: {
     measuredDurationSeconds: 300,
     offeredLoad: "500 to 5,000 iterations/s in 45s stages, followed by a 30s recovery"
+  },
+  reliability: {
+    measuredDurationSeconds: 3_600,
+    offeredLoad: "4,000,000 iterations over 1h (1,111.11 iterations/s average)"
   }
 };
 
 export function createBenchmarkOptions(profile: BenchmarkProfile): Options {
+  const reliabilityThresholds = profile === "reliability"
+    ? {
+        "http_req_failed{phase:measured}": ["rate<0.001"],
+        "checks{phase:measured}": ["rate>0.999"],
+        "lookup_contract_failures{phase:measured}": ["rate<0.001"]
+      }
+    : {
+        "http_req_failed{phase:measured}": ["rate<0.01"],
+        "checks{phase:measured}": ["rate>0.99"],
+        "lookup_contract_failures{phase:measured}": ["rate<0.01"]
+      };
   return {
     discardResponseBodies: false,
     summaryTrendStats: ["avg", "min", "p(50)", "p(95)", "p(99)", "max"],
@@ -115,9 +138,7 @@ export function createBenchmarkOptions(profile: BenchmarkProfile): Options {
     },
     thresholds: {
       "http_req_duration{phase:measured}": ["p(95)<1000", "p(99)<2000"],
-      "http_req_failed{phase:measured}": ["rate<0.01"],
-      "checks{phase:measured}": ["rate>0.99"],
-      "lookup_contract_failures{phase:measured}": ["rate<0.01"],
+      ...reliabilityThresholds,
       "lookup_hits{phase:measured}": ["count>=0"],
       "lookup_misses{phase:measured}": ["count>=0"],
       "http_reqs{phase:measured}": ["count>0"],

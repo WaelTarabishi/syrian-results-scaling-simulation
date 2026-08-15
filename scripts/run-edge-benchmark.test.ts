@@ -6,6 +6,8 @@ describe("Edge benchmark runner", () => {
     const source = await readFile(new URL("./run-edge-benchmark.ts", import.meta.url), "utf8");
     expect(source).toContain('K6_TARGET: "edge"');
     expect(source).toContain("EDGE_CONFIRM_CAPACITY");
+    expect(source).toContain("EDGE_CONFIRM_RELIABILITY");
+    expect(source).toContain("4,000,000 measured requests");
     expect(source).toContain("normalizeAndValidateBaseUrl");
   });
 });

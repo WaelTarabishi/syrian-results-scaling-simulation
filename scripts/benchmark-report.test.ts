@@ -68,7 +68,7 @@ describe("benchmark report", () => {
     const run = parseBenchmarkRun(summary(), "traditional-private-load-1.summary.json");
     run.runId = "</script><script>alert('unsafe')</script>";
     const html = createBenchmarkReportHtml([run]);
-    expect(html).toContain("EC2 benchmark results");
+    expect(html).toContain("Result-release load benchmark");
     expect(html).toContain("\\u003c/script>");
     expect(html).not.toContain("</script><script>alert");
   });
@@ -85,16 +85,32 @@ describe("benchmark report", () => {
     expect(comparisons[0]?.edge.runId).toBe("edge-ec2-stress-1");
   });
 
-  it("explains the final comparison in non-technical language", () => {
+  it("frames the executive summary around load handling rather than speed", () => {
     const baseRun = parseBenchmarkRun(summary({ profile: "stress" }), "run.summary.json");
     const html = createBenchmarkReportHtml([
       { ...baseRun, runId: "traditional-private-stress-1", target: "traditional" },
       { ...baseRun, runId: "edge-ec2-stress-1", target: "edge", p95Ms: 130 }
     ]);
-    expect(html).toContain("Final comparison");
-    expect(html).toContain("95 out of 100 responses finished within");
-    expect(html).toContain("Traditional used private VPC HTTP; Edge used public HTTPS");
-    expect(html).toContain("Capacity was skipped");
+    expect(html).toContain("Load handling and operational fit");
+    expect(html).toContain("Scheduled work completed");
+    expect(html).toContain("without a dedicated API server or PostgreSQL");
+    expect(html).toContain("Latency is not used here to rank architectures");
+    expect(html).not.toContain("lower response time");
+    expect(html).not.toContain("returned responses much faster");
+  });
+
+  it("labels Traditional capacity evidence without claiming an Edge capacity result", () => {
+    const baseRun = parseBenchmarkRun(summary({ profile: "stress" }), "run.summary.json");
+    const capacityRun = parseBenchmarkRun(summary({ profile: "capacity", droppedIterations: 159_182 }), "capacity.summary.json");
+    capacityRun.requestCount = 512_067;
+    const html = createBenchmarkReportHtml([
+      { ...baseRun, runId: "traditional-private-stress-1", target: "traditional" },
+      { ...baseRun, runId: "edge-ec2-stress-1", target: "edge" },
+      { ...capacityRun, runId: "traditional-private-capacity-1", target: "traditional", profile: "capacity" }
+    ]);
+    expect(html).toContain("The single Traditional deployment saturated");
+    expect(html).toContain("Edge capacity was not run");
+    expect(html).toContain("76.29%");
   });
 
   it("rejects unsupported profiles", () => {
